@@ -90,9 +90,12 @@ class Spotify:
             if response.status_code >= 400:
                 raise SpotifyError(response.status_code, _error_message(response))
 
-            if response.status_code == 204 or not response.content:
+            if "application/json" not in response.headers.get("content-type", ""):
                 return None
-            return response.json()
+            try:
+                return response.json()
+            except ValueError:
+                return None
 
         raise SpotifyError(response.status_code, _error_message(response))
 
@@ -144,8 +147,9 @@ class Spotify:
             device=device.get("name", ""),
         )
 
-    async def play(self) -> None:
-        await self.request("PUT", "/me/player/play")
+    async def play(self, device_id: str | None = None) -> None:
+        params = {"device_id": device_id} if device_id else None
+        await self.request("PUT", "/me/player/play", params=params)
 
     async def pause(self) -> None:
         await self.request("PUT", "/me/player/pause")

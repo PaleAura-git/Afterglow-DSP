@@ -168,6 +168,7 @@ class HomeScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.device_id: str | None = None
         self.now_playing = self.query_one(NowPlaying)
         self.load_user()
         self.connect_engine()
@@ -197,6 +198,7 @@ class HomeScreen(Screen):
         except (engine.EngineError, SpotifyError, AuthError) as error:
             self.show_message(f"[red]{error}[/]  c: retry")
             return
+        self.device_id = device.id
         self.show_message(f"on {device.name}")
         self.poll()
 
@@ -228,7 +230,7 @@ class HomeScreen(Screen):
                 playback.is_playing = True
                 playback.moved_to(playback.progress_ms)
                 self.now_playing.refresh()
-            self.control(self.app.spotify.play)
+            self.control(self.app.spotify.play, self.device_id)
 
     def action_seek(self, direction: int) -> None:
         playback = self.playback
