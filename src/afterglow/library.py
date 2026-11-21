@@ -63,6 +63,9 @@ class Column(OptionList):
     }
     """
 
+    def render_row(self, item) -> Text:
+        return _row(item)
+
     def __init__(self, title: str = "", **kwargs) -> None:
         super().__init__(**kwargs)
         self.border_title = title
@@ -95,7 +98,7 @@ class Column(OptionList):
         self.total = total
         self.loader = loader
         self.clear_options()
-        self.add_options([Option(_row(item)) for item in self.items])
+        self.add_options([Option(self.render_row(item)) for item in self.items])
         if self.items:
             self.highlighted = 0
 
@@ -132,7 +135,7 @@ class Column(OptionList):
         if key != self.key or not page.items:
             return
         self.items.extend(page.items)
-        self.add_options([Option(_row(item)) for item in page.items])
+        self.add_options([Option(self.render_row(item)) for item in page.items])
 
 
 class LibraryView(Horizontal):

@@ -85,7 +85,19 @@ class Page:
     total: int
 
 
+@dataclass(frozen=True)
+class Result:
+    kind: str
+    name: str
+    subtitle: str
+    uri: str
+    context_uri: str
+    duration_ms: int = 0
+    yours: bool = False
+
+
 PAGE_SIZE = 50
+SEARCH_LIMIT = 10
 
 REPEAT_CYCLE = {"off": "context", "context": "track", "track": "off"}
 
@@ -238,6 +250,24 @@ class Spotify:
         )
         return Page([_track(item) for item in data["items"] if item], data["total"])
 
+    async def search(self, query: str) -> list[Result]:
+        data = await self.request(
+            "GET",
+            "/search",
+            params={"q": query, "type": "track,artist,album,playlist", "limit": SEARCH_LIMIT},
+        )
+        return _search_results(data or {})
+
+    async def all_pages(self, loader) -> list:
+        first = await loader(0)
+        items = list(first.items)
+        while len(items) < first.total:
+            page = await loader(len(items))
+            if not page.items:
+                break
+            items.extend(page.items)
+        return items
+
     async def playlist_tracks(self, playlist_id: str, offset: int = 0) -> Page:
         data = await self.request(
             "GET", f"/playlists/{playlist_id}/items", params={"limit": PAGE_SIZE, "offset": offset}
@@ -271,6 +301,28 @@ class Spotify:
 
     async def set_repeat(self, state: str) -> None:
         await self.request("PUT", "/me/player/repeat", params={"state": state})
+
+
+def _search_results(data: dict) -> list[Result]:
+    results: list[Result] = []
+    for track in (data.get("tracks") or {}).get("items") or []:
+        if not track:
+            continue
+        album = track.get("album") or {}
+        results.append(
+            Result("track", track["name"], _artists(track), track["uri"], album.get("uri", ""), track.get("duration_ms") or 0)
+        )
+    for artist in (data.get("artists") or {}).get("items") or []:
+        if artist:
+            results.append(Result("artist", artist["name"], "", artist["uri"], artist["uri"]))
+    for album in (data.get("albums") or {}).get("items") or []:
+        if album:
+            results.append(Result("album", album["name"], _artists(album), album["uri"], album["uri"]))
+    for playlist in (data.get("playlists") or {}).get("items") or []:
+        if playlist:
+            owner = (playlist.get("owner") or {}).get("display_name") or ""
+            results.append(Result("playlist", playlist["name"], owner, playlist["uri"], playlist["uri"]))
+    return results
 
 
 def _artists(item: dict) -> str:

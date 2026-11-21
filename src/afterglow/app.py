@@ -12,6 +12,7 @@ from afterglow.config import Config
 from afterglow import engine
 from afterglow.cover import Cover
 from afterglow.library import LibraryView
+from afterglow.search import SearchView
 from afterglow.nowplaying import MiniPlayer, NowPlayingView, PlaybackWidget
 from afterglow.spotify import REPEAT_CYCLE, Spotify, SpotifyError
 
@@ -179,7 +180,7 @@ class MainScreen(Screen):
         with ContentSwitcher(id="views", initial="now-playing"):
             yield NowPlayingView(id="now-playing")
             yield LibraryView(id="library")
-            yield Static("search: coming in 6c", id="search", classes="placeholder")
+            yield SearchView(id="search")
         yield MiniPlayer()
         yield Static("connecting...", id="message")
         yield Footer()
@@ -199,6 +200,8 @@ class MainScreen(Screen):
         self.query_one(MiniPlayer).display = tab != "now-playing"
         if tab == "library":
             self.query_one("#library #sections").focus()
+        elif tab == "search":
+            self.query_one(SearchView).activate()
         accent = self.app.current_theme.accent or "white"
         labels = [
             f"[bold {accent}]{index}:{label}[/]" if key == tab else f"[dim]{index}:{label}[/]"
