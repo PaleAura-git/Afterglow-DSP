@@ -31,9 +31,14 @@ CALLBACK_PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>afterglow</title>
 <style>
 body {{ background:#111; color:#ddd; font-family:monospace; display:grid;
-       place-items:center; height:100vh; margin:0; }}
+       place-items:center; height:100vh; margin:0; text-align:center; }}
+pre {{ display:inline-block; text-align:left; font-size:1.4em; line-height:1.3; margin:0 0 1em; }}
 </style></head>
-<body><div><h2>{title}</h2><p>{message}</p></div></body></html>"""
+<body><div>{heading}<p>{message}</p></div></body></html>"""
+
+SPARKLE = """  .  *  .
+*  you're in  *
+  '  *  '"""
 
 
 class AuthError(Exception):
@@ -138,10 +143,11 @@ async def wait_for_code(config: Config, state: str, timeout: float = 300) -> str
                 title, message = "something's off", "This login link didn't match. Try again from afterglow."
                 outcome = AuthError("Login state mismatch")
             else:
-                title, message = "you're in ✨", "You can close this tab and head back to afterglow."
+                title, message = None, "You can close this tab and head back to afterglow."
                 outcome = code
 
-            body = CALLBACK_PAGE.format(title=title, message=message).encode()
+            heading = f"<pre>{SPARKLE}</pre>" if title is None else f"<h2>{title}</h2>"
+            body = CALLBACK_PAGE.format(heading=heading, message=message).encode()
             writer.write(
                 b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
                 + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()

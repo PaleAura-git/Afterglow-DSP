@@ -5,6 +5,7 @@ from pathlib import Path
 
 APP_NAME = "afterglow"
 DEFAULT_REDIRECT_URI = "http://127.0.0.1:8989/login"
+DEFAULT_DEVICE_NAME = "Web Player (Chrome)"
 
 
 def _xdg_dir(env_var: str, fallback: str) -> Path:
@@ -26,6 +27,8 @@ class ConfigError(Exception):
 class Config:
     client_id: str
     redirect_uri: str = DEFAULT_REDIRECT_URI
+    device_name: str = DEFAULT_DEVICE_NAME
+    engine_command: str = ""
 
 
 def load_config(path: Path = CONFIG_FILE) -> Config:
@@ -42,5 +45,9 @@ def load_config(path: Path = CONFIG_FILE) -> Config:
     if not client_id:
         raise ConfigError(f"'client_id' is missing in {path}")
 
-    redirect_uri = str(data.get("redirect_uri", DEFAULT_REDIRECT_URI)).strip()
-    return Config(client_id=client_id, redirect_uri=redirect_uri)
+    return Config(
+        client_id=client_id,
+        redirect_uri=str(data.get("redirect_uri", DEFAULT_REDIRECT_URI)).strip(),
+        device_name=str(data.get("device_name", DEFAULT_DEVICE_NAME)).strip(),
+        engine_command=str(data.get("engine_command", "")).strip(),
+    )
