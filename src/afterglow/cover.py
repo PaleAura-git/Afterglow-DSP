@@ -126,7 +126,7 @@ class Cover(Widget):
         self.refresh()
 
     def _accent(self) -> str:
-        return self.app.current_theme.accent or "white"
+        return self.app.art_color()
 
     def render_line(self, y: int) -> Strip:
         if y < len(self.strips):

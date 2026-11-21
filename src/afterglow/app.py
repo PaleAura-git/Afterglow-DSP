@@ -1,5 +1,6 @@
 import asyncio
 import webbrowser
+from pathlib import Path
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -13,6 +14,14 @@ from afterglow import engine
 from afterglow.cover import Cover
 from afterglow.library import LibraryView
 from afterglow.search import SearchView
+from afterglow.theme import (
+    DEFAULT_THEME_FILE,
+    FALLBACK_THEME,
+    ThemeWatcher,
+    load_palette,
+    load_theme,
+    resolve_color,
+)
 from afterglow.nowplaying import MiniPlayer, NowPlayingView, PlaybackWidget
 from afterglow.spotify import REPEAT_CYCLE, Spotify, SpotifyError
 
@@ -150,6 +159,7 @@ POLL_SECONDS = 2.5
 TICK_SECONDS = 0.5
 SEEK_MS = 5000
 VOLUME_STEP = 5
+THEME_CHECK_SECONDS = 2.0
 TABS = (("now-playing", "now playing"), ("library", "library"), ("search", "search"))
 
 
@@ -345,9 +355,35 @@ class AfterglowApp(App):
         super().__init__()
         self.session = Session(config)
         self.spotify = Spotify(self.session)
+        theme_file = Path(config.theme_file).expanduser() if config.theme_file else DEFAULT_THEME_FILE
+        self.theme_watcher = ThemeWatcher(theme_file)
+        self.palette: dict[str, str] = {}
 
     async def on_unmount(self) -> None:
         await self.spotify.close()
 
     def on_mount(self) -> None:
+        self.sync_theme()
+        self.set_interval(THEME_CHECK_SECONDS, self.sync_theme)
         self.push_screen(MainScreen() if self.session.logged_in else LoginScreen())
+
+    def art_color(self) -> str:
+        accent = self.current_theme.accent or "white"
+        return resolve_color(self.session.config.art_color, self.palette, accent)
+
+    def sync_theme(self) -> None:
+        if not self.theme_watcher.changed():
+            return
+        self.palette = load_palette(self.theme_watcher.path)
+        theme = load_theme(self.theme_watcher.path)
+        if theme is None:
+            self.theme = FALLBACK_THEME
+            return
+        self.register_theme(theme)
+        self.theme = theme.name
+        self.refresh_css()
+        for cover in self.query(Cover):
+            cover.draw()
+        for screen in self.screen_stack:
+            if isinstance(screen, MainScreen) and screen.is_mounted:
+                screen.switch_tab(screen.query_one("#views", ContentSwitcher).current)

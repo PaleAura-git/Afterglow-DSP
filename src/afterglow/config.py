@@ -31,6 +31,8 @@ class Config:
     redirect_uri: str = DEFAULT_REDIRECT_URI
     device_name: str = DEFAULT_DEVICE_NAME
     engine_command: str = ""
+    theme_file: str = ""
+    art_color: str = "accent"
 
 
 def load_config(path: Path = CONFIG_FILE) -> Config:
@@ -52,4 +54,6 @@ def load_config(path: Path = CONFIG_FILE) -> Config:
         redirect_uri=str(data.get("redirect_uri", DEFAULT_REDIRECT_URI)).strip(),
         device_name=str(data.get("device_name", DEFAULT_DEVICE_NAME)).strip(),
         engine_command=str(data.get("engine_command", "")).strip(),
+        theme_file=str(data.get("theme_file", "")).strip(),
+        art_color=str(data.get("art_color", "accent")).strip(),
     )
