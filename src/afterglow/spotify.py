@@ -44,6 +44,7 @@ class Playback:
     repeat: str
     volume: int | None
     device: str
+    art_url: str = ""
     fetched_at: float = field(default_factory=time.monotonic)
 
     @property
@@ -130,9 +131,11 @@ class Spotify:
         if item.get("type") == "episode":
             artists = item.get("show", {}).get("name", "")
             album = item.get("show", {}).get("publisher", "")
+            images = item.get("images") or item.get("show", {}).get("images", [])
         else:
             artists = ", ".join(artist["name"] for artist in item.get("artists", []))
             album = item.get("album", {}).get("name", "")
+            images = item.get("album", {}).get("images", [])
         device = data.get("device") or {}
         return Playback(
             is_playing=data.get("is_playing", False),
@@ -145,6 +148,7 @@ class Spotify:
             repeat=data.get("repeat_state", "off"),
             volume=device.get("volume_percent"),
             device=device.get("name", ""),
+            art_url=_smallest_image(images, 64),
         )
 
     async def play(self, device_id: str | None = None) -> None:
@@ -173,6 +177,15 @@ class Spotify:
 
     async def set_repeat(self, state: str) -> None:
         await self.request("PUT", "/me/player/repeat", params={"state": state})
+
+
+def _smallest_image(images: list[dict], minimum: int) -> str:
+    usable = [image for image in images if image.get("url")]
+    if not usable:
+        return ""
+    big_enough = [image for image in usable if (image.get("width") or 0) >= minimum]
+    pick = min(big_enough or usable, key=lambda image: image.get("width") or 0)
+    return pick["url"]
 
 
 def _error_message(response: httpx.Response) -> str:

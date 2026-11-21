@@ -3,14 +3,15 @@ import webbrowser
 
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Static
 
 from afterglow.auth import SPARKLE, AuthError, Session, start_login
 from afterglow.config import Config
 from afterglow import engine
-from afterglow.nowplaying import NowPlaying
+from afterglow.cover import Cover
+from afterglow.nowplaying import ProgressLine, TrackInfo
 from afterglow.spotify import REPEAT_CYCLE, Spotify, SpotifyError
 
 CSS = """
@@ -83,7 +84,8 @@ Screen {
     margin-bottom: 1;
 }
 
-NowPlaying {
+#player {
+    height: 10;
     margin-top: 1;
 }
 
@@ -154,6 +156,7 @@ class HomeScreen(Screen):
         ("p", "previous", "Prev"),
         ("s", "shuffle", "Shuffle"),
         ("r", "repeat", "Repeat"),
+        ("a", "art_mode", "Art"),
         ("c", "reconnect", "Reconnect"),
         ("L", "logout", "Log out"),
         ("q", "app.quit", "Quit"),
@@ -163,21 +166,30 @@ class HomeScreen(Screen):
         with Vertical(id="home"):
             yield Static("afterglow", classes="title")
             yield Static("", id="user")
-            yield NowPlaying()
+            with Horizontal(id="player"):
+                yield Cover()
+                yield TrackInfo()
+            yield ProgressLine()
             yield Static("connecting...", id="message")
         yield Footer()
 
     def on_mount(self) -> None:
         self.device_id: str | None = None
-        self.now_playing = self.query_one(NowPlaying)
+        self.info = self.query_one(TrackInfo)
+        self.progress = self.query_one(ProgressLine)
+        self.cover = self.query_one(Cover)
         self.load_user()
         self.connect_engine()
         self.set_interval(POLL_SECONDS, self.poll)
-        self.set_interval(TICK_SECONDS, self.now_playing.refresh)
+        self.set_interval(TICK_SECONDS, self.progress.refresh)
 
     @property
     def playback(self):
-        return self.now_playing.playback
+        return self.info.playback
+
+    def redraw(self) -> None:
+        self.info.refresh()
+        self.progress.refresh()
 
     @work(exclusive=True, group="user")
     async def load_user(self) -> None:
@@ -205,9 +217,12 @@ class HomeScreen(Screen):
     @work(exclusive=True, group="poll")
     async def poll(self) -> None:
         try:
-            self.now_playing.playback = await self.app.spotify.playback()
+            playback = await self.app.spotify.playback()
         except (SpotifyError, AuthError):
-            pass
+            return
+        self.info.playback = playback
+        self.progress.playback = playback
+        self.cover.show(playback.art_url if playback else "")
 
     @work(group="control")
     async def control(self, call, *args) -> None:
@@ -223,13 +238,13 @@ class HomeScreen(Screen):
         if playback and playback.is_playing:
             playback.moved_to(playback.position_ms)
             playback.is_playing = False
-            self.now_playing.refresh()
+            self.redraw()
             self.control(self.app.spotify.pause)
         else:
             if playback:
                 playback.is_playing = True
                 playback.moved_to(playback.progress_ms)
-                self.now_playing.refresh()
+                self.redraw()
             self.control(self.app.spotify.play, self.device_id)
 
     def action_seek(self, direction: int) -> None:
@@ -238,7 +253,7 @@ class HomeScreen(Screen):
             return
         target = playback.position_ms + direction * SEEK_MS
         playback.moved_to(target)
-        self.now_playing.refresh()
+        self.redraw()
         self.control(self.app.spotify.seek, playback.progress_ms)
 
     def action_volume(self, direction: int) -> None:
@@ -246,7 +261,7 @@ class HomeScreen(Screen):
         if not playback or playback.volume is None:
             return
         playback.volume = max(0, min(100, playback.volume + direction * VOLUME_STEP))
-        self.now_playing.refresh()
+        self.redraw()
         self.control(self.app.spotify.set_volume, playback.volume)
 
     def action_next(self) -> None:
@@ -260,7 +275,7 @@ class HomeScreen(Screen):
         if not playback:
             return
         playback.shuffle = not playback.shuffle
-        self.now_playing.refresh()
+        self.redraw()
         self.control(self.app.spotify.set_shuffle, playback.shuffle)
 
     def action_repeat(self) -> None:
@@ -268,8 +283,11 @@ class HomeScreen(Screen):
         if not playback:
             return
         playback.repeat = REPEAT_CYCLE.get(playback.repeat, "off")
-        self.now_playing.refresh()
+        self.redraw()
         self.control(self.app.spotify.set_repeat, playback.repeat)
+
+    def action_art_mode(self) -> None:
+        self.cover.cycle_mode()
 
     def show_message(self, text: str) -> None:
         self.query_one("#message", Static).update(text)
