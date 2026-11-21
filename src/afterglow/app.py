@@ -106,6 +106,29 @@ MiniPlayer {
     height: 3;
 }
 
+MainScreen.-compact #tabs,
+MainScreen.-compact MiniPlayer,
+MainScreen.-compact UpNext {
+    display: none;
+}
+
+MainScreen.-compact NowPlayingView {
+    padding: 0 1;
+}
+
+MainScreen.-compact NowPlayingView #viz {
+    margin-top: 1;
+}
+
+MainScreen.-tiny #big-cover,
+MainScreen.-tiny NowPlayingView #viz {
+    display: none;
+}
+
+MainScreen.-tiny NowPlayingView #details {
+    padding-left: 0;
+}
+
 #message {
     height: 1;
     padding: 0 1;
@@ -162,6 +185,9 @@ SEEK_MS = 5000
 VOLUME_STEP = 5
 THEME_CHECK_SECONDS = 2.0
 MESSAGE_SECONDS = 4.0
+COMPACT_ROWS = 24
+TINY_ROWS = 8
+TINY_COLUMNS = 60
 TABS = (("now-playing", "now playing"), ("library", "library"), ("search", "search"))
 
 
@@ -209,6 +235,11 @@ class MainScreen(Screen):
         self.connect_engine()
         self.set_interval(POLL_SECONDS, self.poll)
         self.set_interval(TICK_SECONDS, self.redraw)
+
+    def on_resize(self) -> None:
+        width, height = self.size.width, self.size.height
+        self.set_class(height < COMPACT_ROWS, "-compact")
+        self.set_class(height < TINY_ROWS or width < TINY_COLUMNS, "-tiny")
 
     def switch_tab(self, tab: str) -> None:
         self.query_one("#views", ContentSwitcher).current = tab

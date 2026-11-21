@@ -133,7 +133,8 @@ class NowPlayingView(Vertical):
         padding-left: 3;
     }
 
-    NowPlayingView Visualizer, NowPlayingView Scope {
+    NowPlayingView #viz {
+        height: 1fr;
         margin-top: 2;
     }
 
@@ -148,8 +149,9 @@ class NowPlayingView(Vertical):
             with Vertical(id="details"):
                 yield TrackInfo()
                 yield UpNext()
-                yield Scope()
-                yield Visualizer()
+                with Vertical(id="viz"):
+                    yield Scope()
+                    yield Visualizer()
         yield ProgressLine()
         yield StatusLine()
 
