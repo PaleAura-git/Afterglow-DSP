@@ -3,15 +3,16 @@ import webbrowser
 
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Static
+from textual.widgets import Button, ContentSwitcher, Footer, Static
 
 from afterglow.auth import SPARKLE, AuthError, Session, start_login
 from afterglow.config import Config
 from afterglow import engine
 from afterglow.cover import Cover
-from afterglow.nowplaying import ProgressLine, TrackInfo
+from afterglow.library import LibraryView
+from afterglow.nowplaying import MiniPlayer, NowPlayingView, PlaybackWidget
 from afterglow.spotify import REPEAT_CYCLE, Spotify, SpotifyError
 
 CSS = """
@@ -71,27 +72,32 @@ Screen {
     display: none;
 }
 
-#home {
-    width: 80;
-    height: auto;
-    max-height: 100%;
-    padding: 1 2;
-    border: solid $accent;
+#tabs {
+    height: 1;
+    padding: 0 1;
+    background: $panel;
 }
 
-#user {
+#views {
+    height: 1fr;
+}
+
+.placeholder {
+    width: 100%;
+    height: 100%;
+    content-align: center middle;
     color: $text-muted;
-    margin-bottom: 1;
 }
 
-#player {
-    height: 10;
-    margin-top: 1;
+MiniPlayer {
+    border-top: solid $panel;
+    height: 3;
 }
 
 #message {
+    height: 1;
+    padding: 0 1;
     color: $text-muted;
-    margin-top: 1;
 }
 """
 
@@ -136,24 +142,30 @@ class LoginScreen(Screen):
             return
         self.query_one("#card").add_class("done")
         await asyncio.sleep(1.5)
-        self.app.switch_screen(HomeScreen())
+        self.app.switch_screen(MainScreen())
 
 
 POLL_SECONDS = 2.5
 TICK_SECONDS = 0.5
 SEEK_MS = 5000
 VOLUME_STEP = 5
+TABS = (("now-playing", "now playing"), ("library", "library"), ("search", "search"))
 
 
-class HomeScreen(Screen):
+class MainScreen(Screen):
     BINDINGS = [
+        ("1", "tab('now-playing')", "Now playing"),
+        ("2", "tab('library')", "Library"),
+        ("3", "tab('search')", "Search"),
+        ("tab", "next_tab", "Next tab"),
+        ("slash", "tab('search')", "Search"),
         ("space", "toggle_play", "Play/Pause"),
-        ("h", "seek(-1)", "-5s"),
-        ("l", "seek(1)", "+5s"),
-        ("j", "volume(-1)", "Vol-"),
-        ("k", "volume(1)", "Vol+"),
         ("n", "next", "Next"),
         ("p", "previous", "Prev"),
+        ("minus", "volume(-1)", "Vol-"),
+        ("equals_sign", "volume(1)", "Vol+"),
+        ("comma", "seek(-1)", "-5s"),
+        ("full_stop", "seek(1)", "+5s"),
         ("s", "shuffle", "Shuffle"),
         ("r", "repeat", "Repeat"),
         ("a", "art_mode", "Art"),
@@ -163,33 +175,55 @@ class HomeScreen(Screen):
     ]
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="home"):
-            yield Static("afterglow", classes="title")
-            yield Static("", id="user")
-            with Horizontal(id="player"):
-                yield Cover()
-                yield TrackInfo()
-            yield ProgressLine()
-            yield Static("connecting...", id="message")
+        yield Static("", id="tabs")
+        with ContentSwitcher(id="views", initial="now-playing"):
+            yield NowPlayingView(id="now-playing")
+            yield LibraryView(id="library")
+            yield Static("search: coming in 6c", id="search", classes="placeholder")
+        yield MiniPlayer()
+        yield Static("connecting...", id="message")
         yield Footer()
 
     def on_mount(self) -> None:
         self.device_id: str | None = None
-        self.info = self.query_one(TrackInfo)
-        self.progress = self.query_one(ProgressLine)
-        self.cover = self.query_one(Cover)
+        self.user_name = ""
+        self.playback = None
+        self.switch_tab("now-playing")
         self.load_user()
         self.connect_engine()
         self.set_interval(POLL_SECONDS, self.poll)
-        self.set_interval(TICK_SECONDS, self.progress.refresh)
+        self.set_interval(TICK_SECONDS, self.redraw)
 
-    @property
-    def playback(self):
-        return self.info.playback
+    def switch_tab(self, tab: str) -> None:
+        self.query_one("#views", ContentSwitcher).current = tab
+        self.query_one(MiniPlayer).display = tab != "now-playing"
+        if tab == "library":
+            self.query_one("#library #sections").focus()
+        accent = self.app.current_theme.accent or "white"
+        labels = [
+            f"[bold {accent}]{index}:{label}[/]" if key == tab else f"[dim]{index}:{label}[/]"
+            for index, (key, label) in enumerate(TABS, start=1)
+        ]
+        right = f"[dim]{self.user_name}[/]" if self.user_name else ""
+        self.query_one("#tabs", Static).update("   ".join(labels) + ("   " + right if right else ""))
+
+    def action_tab(self, tab: str) -> None:
+        self.switch_tab(tab)
+
+    def action_next_tab(self) -> None:
+        keys = [key for key, _ in TABS]
+        current = self.query_one("#views", ContentSwitcher).current
+        self.switch_tab(keys[(keys.index(current) + 1) % len(keys)])
 
     def redraw(self) -> None:
-        self.info.refresh()
-        self.progress.refresh()
+        for widget in self.query(PlaybackWidget):
+            widget.refresh()
+
+    def set_playback(self, playback) -> None:
+        self.playback = playback
+        for widget in self.query(PlaybackWidget):
+            widget.playback = playback
+        self.query_one("#big-cover", Cover).show(playback.art_url if playback else "")
 
     @work(exclusive=True, group="user")
     async def load_user(self) -> None:
@@ -198,7 +232,9 @@ class HomeScreen(Screen):
         except (SpotifyError, AuthError) as error:
             self.show_message(f"[red]{error}[/]")
             return
-        self.query_one("#user", Static).update(f"logged in as {user.name}")
+        self.user_name = user.name
+        self.query_one(LibraryView).user_id = user.id
+        self.switch_tab(self.query_one("#views", ContentSwitcher).current)
 
     @work(exclusive=True, group="engine")
     async def connect_engine(self) -> None:
@@ -220,9 +256,7 @@ class HomeScreen(Screen):
             playback = await self.app.spotify.playback()
         except (SpotifyError, AuthError):
             return
-        self.info.playback = playback
-        self.progress.playback = playback
-        self.cover.show(playback.art_url if playback else "")
+        self.set_playback(playback)
 
     @work(group="control")
     async def control(self, call, *args) -> None:
@@ -251,8 +285,7 @@ class HomeScreen(Screen):
         playback = self.playback
         if not playback:
             return
-        target = playback.position_ms + direction * SEEK_MS
-        playback.moved_to(target)
+        playback.moved_to(playback.position_ms + direction * SEEK_MS)
         self.redraw()
         self.control(self.app.spotify.seek, playback.progress_ms)
 
@@ -287,7 +320,8 @@ class HomeScreen(Screen):
         self.control(self.app.spotify.set_repeat, playback.repeat)
 
     def action_art_mode(self) -> None:
-        self.cover.cycle_mode()
+        for cover in self.query(Cover):
+            cover.cycle_mode()
 
     def show_message(self, text: str) -> None:
         self.query_one("#message", Static).update(text)
@@ -313,4 +347,4 @@ class AfterglowApp(App):
         await self.spotify.close()
 
     def on_mount(self) -> None:
-        self.push_screen(HomeScreen() if self.session.logged_in else LoginScreen())
+        self.push_screen(MainScreen() if self.session.logged_in else LoginScreen())

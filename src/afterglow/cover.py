@@ -9,6 +9,8 @@ from textual import work
 from textual.strip import Strip
 from textual.widget import Widget
 
+from afterglow.state import load_state, save_state
+
 HALF_BLOCK = "▀"
 BRAILLE_BASE = 0x2800
 BRAILLE_DOTS = (
@@ -74,7 +76,8 @@ class Cover(Widget):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.url = ""
-        self.mode = MODES[0]
+        saved = load_state().get("art_mode")
+        self.mode = saved if saved in MODES else MODES[0]
         self.image: Image.Image | None = None
         self.images: dict[str, Image.Image] = {}
         self.strips: list[Strip] = []
@@ -89,8 +92,12 @@ class Cover(Widget):
             return
         self.fetch(url)
 
+    def on_resize(self) -> None:
+        self.draw()
+
     def cycle_mode(self) -> str:
         self.mode = MODES[(MODES.index(self.mode) + 1) % len(MODES)]
+        save_state({"art_mode": self.mode})
         self.draw()
         return self.mode
 

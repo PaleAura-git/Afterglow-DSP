@@ -59,6 +59,34 @@ class Playback:
         self.fetched_at = time.monotonic()
 
 
+@dataclass(frozen=True)
+class Track:
+    id: str
+    uri: str
+    name: str
+    artists: str
+    album: str
+    duration_ms: int
+
+
+@dataclass(frozen=True)
+class Collection:
+    kind: str
+    id: str
+    uri: str
+    name: str
+    subtitle: str
+    total: int
+
+
+@dataclass(frozen=True)
+class Page:
+    items: list
+    total: int
+
+
+PAGE_SIZE = 50
+
 REPEAT_CYCLE = {"off": "context", "context": "track", "track": "off"}
 
 
@@ -151,9 +179,75 @@ class Spotify:
             art_url=_smallest_image(images, 64),
         )
 
-    async def play(self, device_id: str | None = None) -> None:
+    async def play(
+        self,
+        device_id: str | None = None,
+        context_uri: str | None = None,
+        offset_uri: str | None = None,
+    ) -> None:
         params = {"device_id": device_id} if device_id else None
-        await self.request("PUT", "/me/player/play", params=params)
+        body: dict[str, Any] = {}
+        if context_uri:
+            body["context_uri"] = context_uri
+            if offset_uri:
+                body["offset"] = {"uri": offset_uri}
+        await self.request("PUT", "/me/player/play", params=params, json=body or None)
+
+    async def liked_tracks(self, offset: int = 0) -> Page:
+        data = await self.request("GET", "/me/tracks", params={"limit": PAGE_SIZE, "offset": offset})
+        return Page([_track(item.get("track")) for item in data["items"] if item.get("track")], data["total"])
+
+    async def saved_albums(self, offset: int = 0) -> Page:
+        data = await self.request("GET", "/me/albums", params={"limit": PAGE_SIZE, "offset": offset})
+        return Page(
+            [
+                Collection(
+                    kind="album",
+                    id=album["id"],
+                    uri=album["uri"],
+                    name=album["name"],
+                    subtitle=_artists(album),
+                    total=album.get("total_tracks") or 0,
+                )
+                for album in (item["album"] for item in data["items"] if item.get("album"))
+            ],
+            data["total"],
+        )
+
+    async def playlists(self, offset: int = 0) -> Page:
+        data = await self.request("GET", "/me/playlists", params={"limit": PAGE_SIZE, "offset": offset})
+        return Page(
+            [
+                Collection(
+                    kind="playlist",
+                    id=playlist["id"],
+                    uri=playlist["uri"],
+                    name=playlist["name"],
+                    subtitle=(playlist.get("owner") or {}).get("display_name") or "",
+                    total=((playlist.get("items") or playlist.get("tracks")) or {}).get("total") or 0,
+                )
+                for playlist in data["items"]
+                if playlist
+            ],
+            data["total"],
+        )
+
+    async def album_tracks(self, album_id: str, offset: int = 0) -> Page:
+        data = await self.request(
+            "GET", f"/albums/{album_id}/tracks", params={"limit": PAGE_SIZE, "offset": offset}
+        )
+        return Page([_track(item) for item in data["items"] if item], data["total"])
+
+    async def playlist_tracks(self, playlist_id: str, offset: int = 0) -> Page:
+        data = await self.request(
+            "GET", f"/playlists/{playlist_id}/items", params={"limit": PAGE_SIZE, "offset": offset}
+        )
+        tracks = []
+        for entry in data["items"]:
+            item = entry.get("item") or entry.get("track")
+            if item and item.get("uri") and not item.get("is_local"):
+                tracks.append(_track(item))
+        return Page(tracks, data["total"])
 
     async def pause(self) -> None:
         await self.request("PUT", "/me/player/pause")
@@ -177,6 +271,21 @@ class Spotify:
 
     async def set_repeat(self, state: str) -> None:
         await self.request("PUT", "/me/player/repeat", params={"state": state})
+
+
+def _artists(item: dict) -> str:
+    return ", ".join(artist["name"] for artist in item.get("artists", []))
+
+
+def _track(item: dict) -> Track:
+    return Track(
+        id=item.get("id") or "",
+        uri=item["uri"],
+        name=item.get("name", ""),
+        artists=_artists(item) or (item.get("show") or {}).get("name", ""),
+        album=(item.get("album") or {}).get("name", ""),
+        duration_ms=item.get("duration_ms") or 0,
+    )
 
 
 def _smallest_image(images: list[dict], minimum: int) -> str:

@@ -15,8 +15,10 @@ def _xdg_dir(env_var: str, fallback: str) -> Path:
 
 CONFIG_DIR = _xdg_dir("XDG_CONFIG_HOME", ".config")
 CACHE_DIR = _xdg_dir("XDG_CACHE_HOME", ".cache")
+STATE_DIR = _xdg_dir("XDG_STATE_HOME", ".local/state")
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 TOKEN_FILE = CACHE_DIR / "token.json"
+STATE_FILE = STATE_DIR / "state.json"
 
 
 class ConfigError(Exception):
