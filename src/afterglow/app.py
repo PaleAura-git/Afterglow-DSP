@@ -4,14 +4,16 @@ from pathlib import Path
 
 from textual import work
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import Screen
-from textual.widgets import Button, ContentSwitcher, Footer, Static
+from textual.widgets import Button, ContentSwitcher, Static
 
 from afterglow.auth import SPARKLE, AuthError, Session, start_login
 from afterglow.config import Config
 from afterglow import engine
 from afterglow.cover import Cover
+from afterglow.help import HelpScreen
 from afterglow.library import LibraryView
 from afterglow.search import SearchView
 from afterglow.theme import (
@@ -22,7 +24,7 @@ from afterglow.theme import (
     load_theme,
     resolve_color,
 )
-from afterglow.nowplaying import MiniPlayer, NowPlayingView, PlaybackWidget
+from afterglow.nowplaying import MiniPlayer, NowPlayingView, PlaybackWidget, UpNext
 from afterglow.spotify import REPEAT_CYCLE, Spotify, SpotifyError
 
 CSS = """
@@ -122,7 +124,6 @@ class LoginScreen(Screen):
             yield Button("Log in with Spotify", id="login", variant="primary")
             yield Static("", id="link")
             yield Static(SPARKLE, id="sparkle")
-        yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "login":
@@ -160,6 +161,7 @@ TICK_SECONDS = 0.5
 SEEK_MS = 5000
 VOLUME_STEP = 5
 THEME_CHECK_SECONDS = 2.0
+MESSAGE_SECONDS = 4.0
 TABS = (("now-playing", "now playing"), ("library", "library"), ("search", "search"))
 
 
@@ -180,9 +182,11 @@ class MainScreen(Screen):
         ("s", "shuffle", "Shuffle"),
         ("r", "repeat", "Repeat"),
         ("a", "art_mode", "Art"),
+        ("v", "viz_mode", "Visualizer"),
         ("c", "reconnect", "Reconnect"),
         ("L", "logout", "Log out"),
         ("q", "app.quit", "Quit"),
+        Binding("question_mark", "help", "Help", show=False),
     ]
 
     def compose(self) -> ComposeResult:
@@ -192,13 +196,14 @@ class MainScreen(Screen):
             yield LibraryView(id="library")
             yield SearchView(id="search")
         yield MiniPlayer()
-        yield Static("connecting...", id="message")
-        yield Footer()
+        yield Static("", id="message")
 
     def on_mount(self) -> None:
         self.device_id: str | None = None
         self.user_name = ""
         self.playback = None
+        self.queue_for = ""
+        self.message_timer = None
         self.switch_tab("now-playing")
         self.load_user()
         self.connect_engine()
@@ -237,6 +242,21 @@ class MainScreen(Screen):
         for widget in self.query(PlaybackWidget):
             widget.playback = playback
         self.query_one("#big-cover", Cover).show(playback.art_url if playback else "")
+        uri = playback.uri if playback else ""
+        if uri != self.queue_for:
+            self.queue_for = uri
+            self.load_queue()
+
+    @work(exclusive=True, group="queue")
+    async def load_queue(self) -> None:
+        up_next = self.query_one(UpNext)
+        if not self.queue_for:
+            up_next.tracks = []
+            return
+        try:
+            up_next.tracks = await self.app.spotify.queue()
+        except (SpotifyError, AuthError):
+            up_next.tracks = []
 
     @work(exclusive=True, group="user")
     async def load_user(self) -> None:
@@ -260,7 +280,7 @@ class MainScreen(Screen):
             self.show_message(f"[red]{error}[/]  c: retry")
             return
         self.device_id = device.id
-        self.show_message(f"on {device.name}")
+        self.show_message("")
         self.poll()
 
     @work(exclusive=True, group="poll")
@@ -332,12 +352,25 @@ class MainScreen(Screen):
         self.redraw()
         self.control(self.app.spotify.set_repeat, playback.repeat)
 
+    def action_help(self) -> None:
+        self.app.push_screen(HelpScreen())
+
+    async def action_viz_mode(self) -> None:
+        await self.query_one(NowPlayingView).cycle_viz()
+
     def action_art_mode(self) -> None:
         for cover in self.query(Cover):
             cover.cycle_mode()
 
     def show_message(self, text: str) -> None:
-        self.query_one("#message", Static).update(text)
+        message = self.query_one("#message", Static)
+        message.update(text)
+        message.display = bool(text)
+        if self.message_timer:
+            self.message_timer.stop()
+            self.message_timer = None
+        if text and "c: retry" not in text:
+            self.message_timer = self.set_timer(MESSAGE_SECONDS, lambda: self.show_message(""))
 
     def action_reconnect(self) -> None:
         self.connect_engine()

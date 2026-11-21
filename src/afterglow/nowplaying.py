@@ -5,9 +5,14 @@ from textual.reactive import reactive
 from textual.widget import Widget
 
 from afterglow.cover import Cover
-from afterglow.spotify import Playback
+from afterglow.spotify import Playback, Track
+from afterglow.scope import Scope
+from afterglow.state import load_state, save_state
+from afterglow.visualizer import Visualizer
 
+VIZ_MODES = ("scope", "bars")
 REPEAT_LABELS = {"off": "off", "context": "all", "track": "one"}
+UP_NEXT_COUNT = 5
 
 
 def format_time(ms: int) -> str:
@@ -61,11 +66,32 @@ class TrackInfo(PlaybackWidget):
             (playback.artists, ""),
             "\n",
             (playback.album, "dim"),
-            "\n\n",
-            (status_line(playback), "dim"),
             no_wrap=True,
             overflow="ellipsis",
         )
+
+
+class UpNext(Widget):
+    DEFAULT_CSS = """
+    UpNext {
+        height: auto;
+        width: 1fr;
+        margin-top: 2;
+    }
+    """
+
+    tracks: reactive[list[Track]] = reactive(list, always_update=True, layout=True)
+
+    def render(self) -> Text:
+        if not self.tracks:
+            return Text("")
+        text = Text("up next", style="dim bold", no_wrap=True)
+        for track in self.tracks[:UP_NEXT_COUNT]:
+            text.append("\n")
+            text.append(track.name, style="")
+            text.append(f"  {track.artists}  {format_time(track.duration_ms)}", style="dim")
+        text.overflow = "ellipsis"
+        return text
 
 
 class ProgressLine(PlaybackWidget):
@@ -105,7 +131,10 @@ class NowPlayingView(Vertical):
         width: 1fr;
         height: 100%;
         padding-left: 3;
-        align-vertical: bottom;
+    }
+
+    NowPlayingView Visualizer, NowPlayingView Scope {
+        margin-top: 2;
     }
 
     NowPlayingView ProgressLine {
@@ -118,7 +147,32 @@ class NowPlayingView(Vertical):
             yield Cover(id="big-cover")
             with Vertical(id="details"):
                 yield TrackInfo()
+                yield UpNext()
+                yield Scope()
+                yield Visualizer()
         yield ProgressLine()
+        yield StatusLine()
+
+    def on_mount(self) -> None:
+        saved = load_state().get("viz_mode")
+        self.viz_mode = saved if saved in VIZ_MODES else VIZ_MODES[0]
+        self.call_after_refresh(self.apply_viz)
+
+    async def apply_viz(self) -> None:
+        scope, bars = self.query_one(Scope), self.query_one(Visualizer)
+        scope.display = self.viz_mode == "scope"
+        bars.display = self.viz_mode == "bars"
+        if self.viz_mode == "scope":
+            await bars.stop()
+            scope.start()
+        else:
+            await scope.stop()
+            bars.start()
+
+    async def cycle_viz(self) -> None:
+        self.viz_mode = VIZ_MODES[(VIZ_MODES.index(self.viz_mode) + 1) % len(VIZ_MODES)]
+        save_state({"viz_mode": self.viz_mode})
+        await self.apply_viz()
 
     def on_resize(self) -> None:
         stage = self.query_one("#stage")
@@ -126,6 +180,19 @@ class NowPlayingView(Vertical):
         height = stage.size.height
         if height:
             cover.styles.width = min(height * 2, max(stage.size.width // 2, 20))
+
+
+class StatusLine(PlaybackWidget):
+    DEFAULT_CSS = """
+    StatusLine {
+        height: 1;
+        width: 1fr;
+        color: $text-muted;
+    }
+    """
+
+    def render(self) -> Text:
+        return Text(status_line(self.playback) if self.playback else "", no_wrap=True)
 
 
 class MiniPlayer(PlaybackWidget):

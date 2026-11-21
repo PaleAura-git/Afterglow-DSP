@@ -44,6 +44,7 @@ class Playback:
     repeat: str
     volume: int | None
     device: str
+    uri: str = ""
     art_url: str = ""
     fetched_at: float = field(default_factory=time.monotonic)
 
@@ -188,8 +189,13 @@ class Spotify:
             repeat=data.get("repeat_state", "off"),
             volume=device.get("volume_percent"),
             device=device.get("name", ""),
+            uri=item.get("uri", ""),
             art_url=_smallest_image(images, 64),
         )
+
+    async def queue(self) -> list[Track]:
+        data = await self.request("GET", "/me/player/queue")
+        return [_track(item) for item in (data or {}).get("queue") or [] if item and item.get("uri")]
 
     async def play(
         self,
